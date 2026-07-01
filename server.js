@@ -1,4 +1,21 @@
 require('dotenv').config();
+// Validate required environment variables early
+const requiredEnv = [
+  'MPESA_CONSUMER_KEY',
+  'MPESA_CONSUMER_SECRET',
+  'MPESA_PASSKEY',
+  'MPESA_SHORTCODE',
+  'MPESA_ACCOUNT_PREFIX',
+  'BASE_URL'
+];
+
+const missing = requiredEnv.filter(k => !process.env[k] || process.env[k].trim() === '');
+
+if (missing.length) {
+  console.error('Missing required environment variables:', missing.join(', '));
+  console.error('Please copy .env.example to .env and fill in the required values. Exiting.');
+  process.exit(1);
+}
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -242,7 +259,7 @@ app.listen(PORT, () => {
 ║     Jack's Brand API Server            ║
 ║     Listening on port ${PORT}              ║
 ╚════════════════════════════════════════╝
-  `);
+`);
   console.log(`📍 Base URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`💳 M-Pesa Env: ${process.env.MPESA_ENV || 'sandbox'}`);
