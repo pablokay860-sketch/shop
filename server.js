@@ -11,6 +11,52 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// ---------------------------------------------------------------------------
+// In-memory session store (lightweight — no extra dependencies needed)
+// ---------------------------------------------------------------------------
+const sessions = new Map();
+
+const SESSION_COOKIE = 'admin_sid';
+const SESSION_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+const createSession = () => {
+  const sid = crypto.randomBytes(32).toString('hex');
+  sessions.set(sid, { createdAt: Date.now() });
+  return sid;
+};
+
+const isValidSession = (sid) => {
+  if (!sid || !sessions.has(sid)) return false;
+  const session = sessions.get(sid);
+  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
+    sessions.delete(sid);
+    return false;
+  }
+  return true;
+};
+
+const destroySession = (sid) => sessions.delete(sid);
+
+// Parse a simple cookie header into a key→value map
+const parseCookies = (req) => {
+  const raw = req.headers.cookie || '';
+  return Object.fromEntries(
+    raw.split(';').map(c => c.trim().split('=').map(decodeURIComponent))
+  );
+};
+
+// Admin authentication middleware
+const requireAdmin = (req, res, next) => {
+  const cookies = parseCookies(req);
+  const sid = cookies[SESSION_COOKIE];
+  if (isValidSession(sid)) return next();
+  // API routes return JSON; page routes redirect
+  if (req.path.startsWith('/admin/api')) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+  return res.redirect('/admin');
+};
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -217,6 +263,101 @@ app.get('/api/orders', async (req, res) => {
     });
   }
 });
+
+// ===========================================================================
+// Admin Routes
+// ===========================================================================
+
+/**
+ * GET /admin — Serve admin dashboard (login page if not authenticated)
+ */
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+/**
+ * POST /admin/login — Authenticate admin with password
+ */
+app.post('/admin/login', (req, res) => {
+  const { password } = req.body;
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+
+  if (!password || password !== adminPassword) {
+    return res.status(401).json({ success: false, message: 'Invalid password' });
+  }
+
+  const sid = createSession();
+  const maxAge = SESSION_TTL_MS / 1000; // seconds
+  res.setHeader(
+    'Set-Cookie',
+    `${SESSION_COOKIE}=${sid}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}; Path=/`
+  );
+  res.json({ success: true });
+});
+
+/**
+ * POST /admin/logout — Clear admin session
+ */
+app.post('/admin/logout', (req, res) => {
+  const cookies = parseCookies(req);
+  const sid = cookies[SESSION_COOKIE];
+  if (sid) destroySession(sid);
+  res.setHeader(
+    'Set-Cookie',
+    `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Max-Age=0; Path=/`
+  );
+  res.json({ success: true });
+});
+
+/**
+ * GET /admin/api/dashboard — Dashboard stats (protected)
+ */
+app.get('/admin/api/dashboard', requireAdmin, async (req, res) => {
+  try {
+    const stats = await db.getDashboardStats();
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error('Error fetching dashboard stats:', error);
+    res.status(500).json({ success: false, message: 'Error retrieving stats' });
+  }
+});
+
+/**
+ * GET /admin/api/orders — All orders with optional filters (protected)
+ * Query params: status, dateFrom, dateTo
+ */
+app.get('/admin/api/orders', requireAdmin, async (req, res) => {
+  try {
+    const { status, dateFrom, dateTo } = req.query;
+    const orders = await db.getFilteredOrders({ status, dateFrom, dateTo });
+    res.json({ success: true, count: orders.length, orders });
+  } catch (error) {
+    console.error('Error fetching admin orders:', error);
+    res.status(500).json({ success: false, message: 'Error retrieving orders' });
+  }
+});
+
+/**
+ * GET /admin/api/orders/:orderRef — Order detail with items (protected)
+ */
+app.get('/admin/api/orders/:orderRef', requireAdmin, async (req, res) => {
+  try {
+    const { orderRef } = req.params;
+    const order = await db.getOrder(orderRef);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+    const items = await db.getOrderItems(orderRef);
+    res.json({ success: true, order, items });
+  } catch (error) {
+    console.error('Error fetching order detail:', error);
+    res.status(500).json({ success: false, message: 'Error retrieving order' });
+  }
+});
+
+// ===========================================================================
+// Storefront
+// ===========================================================================
 
 /**
  * Serve storefront HTML

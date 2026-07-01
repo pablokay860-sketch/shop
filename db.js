@@ -120,6 +120,67 @@ const getAllOrders = () => {
   });
 };
 
+// Get orders with optional filters (status, date range)
+const getFilteredOrders = (filters = {}) => {
+  return new Promise((resolve, reject) => {
+    let query = `SELECT * FROM orders WHERE 1=1`;
+    const params = [];
+
+    if (filters.status && filters.status !== 'all') {
+      query += ` AND status = ?`;
+      params.push(filters.status);
+    }
+    if (filters.dateFrom) {
+      query += ` AND DATE(createdAt) >= DATE(?)`;
+      params.push(filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      query += ` AND DATE(createdAt) <= DATE(?)`;
+      params.push(filters.dateTo);
+    }
+
+    query += ` ORDER BY createdAt DESC`;
+
+    db.all(query, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows || []);
+    });
+  });
+};
+
+// Get items for a specific order
+const getOrderItems = (orderRef) => {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT * FROM order_items WHERE orderRef = ?`,
+      [orderRef],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      }
+    );
+  });
+};
+
+// Get dashboard stats
+const getDashboardStats = () => {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT
+        COUNT(*) AS totalOrders,
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS totalRevenue,
+        COUNT(CASE WHEN status = 'pending'   THEN 1 END) AS pendingCount,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completedCount,
+        COUNT(CASE WHEN status = 'failed'    THEN 1 END) AS failedCount
+      FROM orders`,
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+};
+
 // Close database connection gracefully
 const closeDb = () => {
   db.close((err) => {
@@ -138,5 +199,8 @@ module.exports = {
   getOrder,
   updateOrderStatus,
   getAllOrders,
+  getFilteredOrders,
+  getOrderItems,
+  getDashboardStats,
   closeDb
 };
