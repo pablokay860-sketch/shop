@@ -3,7 +3,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const path = require('path');
-const { v4: uuidv4 } = require('crypto').randomUUID ? null : require('uuid');
 const crypto = require('crypto');
 
 const mpesa = require('./mpesa');
