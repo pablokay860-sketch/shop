@@ -41,6 +41,19 @@ db.serialize(() => {
       console.log('✓ Order items table initialized');
     }
   });
+
+  // Add checkoutRequestId column if it doesn't exist yet (safe to run on startup)
+  db.run(`ALTER TABLE orders ADD COLUMN checkoutRequestId TEXT`, (err) => {
+    // SQLite will error if column already exists — ignore that error
+    if (err) {
+      // Only log unexpected errors
+      if (!/duplicate column name/i.test(err.message)) {
+        console.debug('ALTER TABLE skipped or failed (likely already present):', err.message);
+      }
+    } else {
+      console.log('✓ Added checkoutRequestId column to orders table');
+    }
+  });
 });
 
 // Create a new order
@@ -84,6 +97,34 @@ const getOrder = (orderRef) => {
       (err, row) => {
         if (err) reject(err);
         else resolve(row);
+      }
+    );
+  });
+};
+
+// Get items for an order
+const getOrderItems = (orderRef) => {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT productName, quantity, price FROM order_items WHERE orderRef = ? ORDER BY id ASC`,
+      [orderRef],
+      (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      }
+    );
+  });
+};
+
+// Save CheckoutRequestID returned by M-Pesa when initiating STK push
+const saveCheckoutRequestId = (orderRef, checkoutRequestId) => {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE orders SET checkoutRequestId = ?, updatedAt = CURRENT_TIMESTAMP WHERE orderRef = ?`,
+      [checkoutRequestId, orderRef],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes);
       }
     );
   });
@@ -136,6 +177,8 @@ module.exports = {
   createOrder,
   addOrderItems,
   getOrder,
+  getOrderItems,
+  saveCheckoutRequestId,
   updateOrderStatus,
   getAllOrders,
   closeDb
