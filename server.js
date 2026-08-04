@@ -219,6 +219,89 @@ app.get('/api/orders', async (req, res) => {
 });
 
 /**
+ * --- Admin endpoints used by admin frontend (admin.html / admin.js)
+ * These provide basic dashboard data and simple password-based login (stateless)
+ */
+
+// Simple login endpoint (stateless). Set ADMIN_PASSWORD in .env to protect the dashboard.
+app.post('/admin/login', (req, res) => {
+  const { password } = req.body || {};
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  if (password === adminPassword) {
+    return res.json({ success: true });
+  }
+  return res.status(401).json({ success: false, message: 'Invalid password' });
+});
+
+app.post('/admin/logout', (req, res) => {
+  // Stateless logout - client simply discards any state
+  res.json({ success: true });
+});
+
+// Dashboard stats for admin UI
+app.get('/admin/api/dashboard', async (req, res) => {
+  try {
+    const orders = await db.getAllOrders();
+    const totalOrders = orders.length;
+    const totalRevenue = orders.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+    const pendingCount = orders.filter(o => o.status === 'pending').length;
+    const completedCount = orders.filter(o => o.status === 'completed').length;
+    const failedCount = orders.filter(o => o.status === 'failed').length;
+
+    res.json({
+      success: true,
+      stats: { totalOrders, totalRevenue, pendingCount, completedCount, failedCount }
+    });
+  } catch (err) {
+    console.error('Failed to load admin dashboard stats:', err);
+    res.status(500).json({ success: false, message: 'Failed to load stats' });
+  }
+});
+
+// Admin: list orders with optional filters
+app.get('/admin/api/orders', async (req, res) => {
+  try {
+    const { status, dateFrom, dateTo } = req.query;
+    let orders = await db.getAllOrders();
+
+    if (status && status !== 'all') {
+      orders = orders.filter(o => o.status === status);
+    }
+
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      orders = orders.filter(o => new Date(o.createdAt) >= from);
+    }
+
+    if (dateTo) {
+      // include the entire dateTo day
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      orders = orders.filter(o => new Date(o.createdAt) <= to);
+    }
+
+    res.json({ success: true, orders });
+  } catch (err) {
+    console.error('Failed to list orders for admin:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch orders' });
+  }
+});
+
+// Admin: get order details including items
+app.get('/admin/api/orders/:orderRef', async (req, res) => {
+  try {
+    const { orderRef } = req.params;
+    const order = await db.getOrder(orderRef);
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+    const items = await db.getOrderItems(orderRef);
+    res.json({ success: true, order, items });
+  } catch (err) {
+    console.error('Failed to fetch order details for admin:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch order details' });
+  }
+});
+
+/**
  * Serve storefront HTML
  */
 app.get('/', (req, res) => {
