@@ -8,8 +8,15 @@ const db = new sqlite3.Database(dbPath);
 db.serialize(() => {
   // Performance/consistency pragmas
   try {
-    db.run(`PRAGMA journal_mode = WAL`);
-    db.run(`PRAGMA synchronous = NORMAL`);
+    db.run(`PRAGMA journal_mode = WAL`, (err) => {
+      if (err) console.warn('PRAGMA journal_mode WAL failed:', err.message || err);
+      else console.log('✓ PRAGMA journal_mode = WAL');
+    });
+
+    db.run(`PRAGMA synchronous = NORMAL`, (err) => {
+      if (err) console.warn('PRAGMA synchronous NORMAL failed:', err.message || err);
+      else console.log('✓ PRAGMA synchronous = NORMAL');
+    });
   } catch (err) {
     console.warn('Failed to set PRAGMA:', err.message || err);
   }
@@ -64,10 +71,25 @@ db.serialize(() => {
   });
 
   // Create useful indexes to speed common lookups
-  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_checkoutRequestId ON orders(checkoutRequestId)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_createdAt ON orders(createdAt)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_checkoutRequestId ON orders(checkoutRequestId)`, (err) => {
+    if (err) console.warn('Could not create index idx_orders_checkoutRequestId:', err.message || err);
+    else console.log('✓ Index idx_orders_checkoutRequestId ensured');
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`, (err) => {
+    if (err) console.warn('Could not create index idx_orders_status:', err.message || err);
+    else console.log('✓ Index idx_orders_status ensured');
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_createdAt ON orders(createdAt)`, (err) => {
+    if (err) console.warn('Could not create index idx_orders_createdAt:', err.message || err);
+    else console.log('✓ Index idx_orders_createdAt ensured');
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone)`, (err) => {
+    if (err) console.warn('Could not create index idx_orders_phone:', err.message || err);
+    else console.log('✓ Index idx_orders_phone ensured');
+  });
 });
 
 // Create a new order
