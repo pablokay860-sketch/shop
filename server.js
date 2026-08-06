@@ -66,6 +66,15 @@ app.post('/api/checkout', async (req, res) => {
     const stkResult = await mpesa.initiateSTKPush(phone, amount, orderRef, baseUrl);
 
     if (stkResult.success) {
+      // Persist CheckoutRequestID so callbacks can map to this order efficiently
+      try {
+        if (stkResult.checkoutRequestId) {
+          await db.saveCheckoutRequestId(orderRef, stkResult.checkoutRequestId);
+        }
+      } catch (err) {
+        console.warn('Warning: failed to save checkoutRequestId for', orderRef, err.message || err);
+      }
+
       res.json({
         success: true,
         orderRef: orderRef,
@@ -124,13 +133,23 @@ app.post('/api/mpesa/callback', async (req, res) => {
 
       console.log(`✓ Payment successful - Amount: KES ${amount}, Phone: ${phone}, M-Pesa Ref: ${mpesaRef}`);
 
-      // Find and update order in database
-      // Note: In production, you'd match using CheckoutRequestID stored during checkout
-      // For now, we'll search by phone and amount (matching most recent)
-      const orders = await db.getAllOrders();
-      const matchingOrder = orders.find(
-        o => o.phone === phone && o.amount === amount && o.status === 'pending'
-      );
+      // Attempt to find and update order in database by CheckoutRequestID (O(1) when indexed)
+      let matchingOrder = null;
+      if (CheckoutRequestID) {
+        try {
+          matchingOrder = await db.getOrderByCheckoutRequestId(CheckoutRequestID);
+        } catch (err) {
+          console.warn('Error querying order by CheckoutRequestID:', err.message || err);
+        }
+      }
+
+      // Fallback: try best-effort search by phone+amount (legacy behavior)
+      if (!matchingOrder) {
+        const orders = await db.getAllOrders();
+        matchingOrder = orders.find(
+          o => o.phone === phone && o.amount === amount && o.status === 'pending'
+        );
+      }
 
       if (matchingOrder) {
         await db.updateOrderStatus(matchingOrder.orderRef, 'completed', mpesaRef);
@@ -325,7 +344,7 @@ app.listen(PORT, () => {
 ║     Jack's Brand API Server            ║
 ║     Listening on port ${PORT}              ║
 ╚════════════════════════════════════════╝
-  `);
+`);
   console.log(`📍 Base URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`💳 M-Pesa Env: ${process.env.MPESA_ENV || 'sandbox'}`);

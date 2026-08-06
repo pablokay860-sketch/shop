@@ -6,6 +6,14 @@ const db = new sqlite3.Database(dbPath);
 
 // Initialize database schema
 db.serialize(() => {
+  // Performance/consistency pragmas
+  try {
+    db.run(`PRAGMA journal_mode = WAL`);
+    db.run(`PRAGMA synchronous = NORMAL`);
+  } catch (err) {
+    console.warn('Failed to set PRAGMA:', err.message || err);
+  }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +62,12 @@ db.serialize(() => {
       console.log('✓ Added checkoutRequestId column to orders table');
     }
   });
+
+  // Create useful indexes to speed common lookups
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_checkoutRequestId ON orders(checkoutRequestId)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_createdAt ON orders(createdAt)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(phone)`);
 });
 
 // Create a new order
@@ -73,17 +87,27 @@ const createOrder = (orderRef, phone, amount) => {
 // Add items to an order
 const addOrderItems = (orderRef, items) => {
   return new Promise((resolve, reject) => {
-    const stmt = db.prepare(
-      `INSERT INTO order_items (orderRef, productName, quantity, price) VALUES (?, ?, ?, ?)`
-    );
+    db.run('BEGIN TRANSACTION', (beginErr) => {
+      if (beginErr) return reject(beginErr);
 
-    items.forEach(item => {
-      stmt.run([orderRef, item.name, item.quantity, item.price]);
-    });
+      const stmt = db.prepare(
+        `INSERT INTO order_items (orderRef, productName, quantity, price) VALUES (?, ?, ?, ?)`
+      );
 
-    stmt.finalize((err) => {
-      if (err) reject(err);
-      else resolve();
+      for (const item of items) {
+        stmt.run([orderRef, item.name, item.quantity, item.price]);
+      }
+
+      stmt.finalize((err) => {
+        if (err) {
+          db.run('ROLLBACK', () => reject(err));
+        } else {
+          db.run('COMMIT', (commitErr) => {
+            if (commitErr) return reject(commitErr);
+            resolve();
+          });
+        }
+      });
     });
   });
 };
@@ -94,6 +118,20 @@ const getOrder = (orderRef) => {
     db.get(
       `SELECT * FROM orders WHERE orderRef = ?`,
       [orderRef],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+};
+
+// Get order by CheckoutRequestID
+const getOrderByCheckoutRequestId = (checkoutRequestId) => {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM orders WHERE checkoutRequestId = ? LIMIT 1`,
+      [checkoutRequestId],
       (err, row) => {
         if (err) reject(err);
         else resolve(row);
@@ -179,6 +217,7 @@ module.exports = {
   getOrder,
   getOrderItems,
   saveCheckoutRequestId,
+  getOrderByCheckoutRequestId,
   updateOrderStatus,
   getAllOrders,
   closeDb
